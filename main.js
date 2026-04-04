@@ -254,8 +254,12 @@ function snapToQuarter(hours) {
     return Math.round(hours * 4) / 4;
 }
 
+// ── End time of an event (instant events treated as 1-min for overlap) ──
+function eventEndTime(ev) {
+    return ev.startTime + (ev.durationMin || 1) / 60;
+}
+
 // ── Compute overlap layout for a list of day events ─────────────
-// Returns an array of { event, colIndex, totalCols } in render order.
 function computeOverlapLayout(dayEvents) {
     if (dayEvents.length === 0) return [];
 
@@ -268,32 +272,30 @@ function computeOverlapLayout(dayEvents) {
     // Build overlap groups: events that transitively overlap share a group
     var groups = [];
     var currentGroup = [sorted[0]];
-    var groupEnd = sorted[0].startTime + (sorted[0].durationMin || 1) / 60;
+    var groupEnd = eventEndTime(sorted[0]);
 
     for (var i = 1; i < sorted.length; i++) {
         var ev = sorted[i];
         if (ev.startTime < groupEnd) {
-            // Overlaps with current group
             currentGroup.push(ev);
-            var evEnd = ev.startTime + (ev.durationMin || 1) / 60;
+            var evEnd = eventEndTime(ev);
             if (evEnd > groupEnd) groupEnd = evEnd;
         } else {
             groups.push(currentGroup);
             currentGroup = [ev];
-            groupEnd = ev.startTime + (ev.durationMin || 1) / 60;
+            groupEnd = eventEndTime(ev);
         }
     }
     groups.push(currentGroup);
 
-    // Assign columns within each group
     var result = [];
     for (var g = 0; g < groups.length; g++) {
         var group = groups[g];
-        var columns = []; // columns[col] = end time of last event in that column
+        var columns = [];
 
         for (var j = 0; j < group.length; j++) {
             var ev = group[j];
-            var evEnd = ev.startTime + (ev.durationMin || 1) / 60;
+            var evEnd = eventEndTime(ev);
 
             // Find first column where this event fits (no overlap)
             var placed = false;
@@ -491,20 +493,10 @@ class CalendarView extends obsidian.ItemView {
                 self.render();
             } else if (e.key === 'ArrowLeft') {
                 e.preventDefault();
-                if (self.isSidebar()) self.sidebarUserNavigated = true;
-                var d = new Date(self.weekStart);
-                d.setDate(d.getDate() - self.navStep());
-                self.weekStart = self.isSidebar() ? d : getMonday(d);
-                self._slideDirection = 'prev';
-                self.render();
+                self.navigate('prev');
             } else if (e.key === 'ArrowRight') {
                 e.preventDefault();
-                if (self.isSidebar()) self.sidebarUserNavigated = true;
-                var d = new Date(self.weekStart);
-                d.setDate(d.getDate() + self.navStep());
-                self.weekStart = self.isSidebar() ? d : getMonday(d);
-                self._slideDirection = 'next';
-                self.render();
+                self.navigate('next');
             } else if (e.key === 'n' || e.key === 'N') {
                 e.preventDefault();
                 // Create event at current hour on focused day
@@ -683,6 +675,9 @@ class CalendarView extends obsidian.ItemView {
                     title: fm.displayTitle || formatTitle(file.basename),
                     folderLabel: matchedFolder ? matchedFolder.label : null,
                     location: fm.location || null,
+                    isMultiDayStart: false,
+                    isMultiDayEnd: false,
+                    isMultiDayMiddle: false,
                 });
             }
         }
@@ -787,6 +782,17 @@ class CalendarView extends obsidian.ItemView {
         return this.isSidebar() ? 1 : 7;
     }
 
+    // ── Shared navigation logic for prev/next ──────────────────
+    navigate(direction) {
+        if (this.isSidebar()) this.sidebarUserNavigated = true;
+        this.focusedDate = dateKey(new Date());
+        var d = new Date(this.weekStart);
+        d.setDate(d.getDate() + (direction === 'next' ? this.navStep() : -this.navStep()));
+        this.weekStart = this.isSidebar() ? d : getMonday(d);
+        this._slideDirection = direction;
+        this.render();
+    }
+
     // ── Header: nav + week/day label ──────────────────────────────
     renderHeader(container) {
         var self = this;
@@ -795,28 +801,12 @@ class CalendarView extends obsidian.ItemView {
         // Prev
         var prevBtn = header.createEl('button', { cls: 'cal-nav-btn' });
         obsidian.setIcon(prevBtn, 'chevron-left');
-        prevBtn.addEventListener('click', function () {
-            if (self.isSidebar()) self.sidebarUserNavigated = true;
-            self.focusedDate = dateKey(new Date());
-            var d = new Date(self.weekStart);
-            d.setDate(d.getDate() - self.navStep());
-            self.weekStart = self.isSidebar() ? d : getMonday(d);
-            self._slideDirection = 'prev';
-            self.render();
-        });
+        prevBtn.addEventListener('click', function () { self.navigate('prev'); });
 
         // Next
         var nextBtn = header.createEl('button', { cls: 'cal-nav-btn' });
         obsidian.setIcon(nextBtn, 'chevron-right');
-        nextBtn.addEventListener('click', function () {
-            if (self.isSidebar()) self.sidebarUserNavigated = true;
-            self.focusedDate = dateKey(new Date());
-            var d = new Date(self.weekStart);
-            d.setDate(d.getDate() + self.navStep());
-            self.weekStart = self.isSidebar() ? d : getMonday(d);
-            self._slideDirection = 'next';
-            self.render();
-        });
+        nextBtn.addEventListener('click', function () { self.navigate('next'); });
 
         // Label
         var label;
@@ -972,7 +962,7 @@ class CalendarView extends obsidian.ItemView {
             var layout = computeOverlapLayout(dayEvents);
             for (var i = 0; i < layout.length; i++) {
                 var item = layout[i];
-                this.renderEvent(dayCol, item.event, i, item.colIndex, item.totalCols);
+                this.renderEvent(dayCol, item);
             }
 
             // Place journey blocks (map mode — delegates to iris-maps plugin)
@@ -1262,8 +1252,11 @@ class CalendarView extends obsidian.ItemView {
         return { el: el, titleEl: titleEl, timeEl: timeEl, shape: shape, top: top, height: height };
     }
 
-    renderEvent(dayCol, ev, index, colIndex, totalCols) {
+    renderEvent(dayCol, layoutItem) {
         var self = this;
+        var ev = layoutItem.event;
+        var colIndex = layoutItem.colIndex;
+        var totalCols = layoutItem.totalCols;
         var rules = this.plugin.settings.colorRules;
         var hex = resolveColor(matchColorRules(rules, ev.file, ev.fm) || this.plugin.settings.defaultColor);
 
@@ -1276,7 +1269,6 @@ class CalendarView extends obsidian.ItemView {
 
         var el = result.el;
 
-        // Apply overlap layout
         if (totalCols > 1) {
             var pct = 100 / totalCols;
             el.style.left = (colIndex * pct) + '%';

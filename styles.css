@@ -152,6 +152,23 @@
     overflow-y: auto;
 }
 
+.cal-body::-webkit-scrollbar {
+    width: 0;
+}
+
+.cal-body:hover::-webkit-scrollbar {
+    width: 6px;
+}
+
+.cal-body::-webkit-scrollbar-thumb {
+    background: var(--background-modifier-border);
+    border-radius: 3px;
+}
+
+.cal-body::-webkit-scrollbar-track {
+    background: transparent;
+}
+
 .cal-row {
     display: flex;
 }
@@ -179,9 +196,6 @@
     min-width: 0;
 }
 
-.cal-day-col-today {
-    background: var(--background-secondary);
-}
 
 /* ── Hour gridlines ───────────────────────────────────────────── */
 .cal-hour-line {
@@ -816,4 +830,88 @@
     padding-top: 2px;
     min-width: 0;
     overflow: hidden;
+}
+
+/* ── Responsive: compact (width < 550px) ─────────────────────── */
+
+.cal-compact .cal-day-header {
+    padding: 4px 0;
+}
+
+
+.cal-compact .cal-time-gutter {
+    width: 40px;
+}
+
+.cal-compact .cal-hour-label {
+    font-size: 10px;
+    padding-right: 4px;
+}
+
+.cal-compact .cal-event-title {
+    font-size: 11px;
+}
+
+.cal-compact .cal-event-folder {
+    display: none;
+}
+
+.cal-compact .cal-task-label {
+    display: none;
+}
+
+.cal-compact .cal-allday-gutter {
+    display: none;
+}
+
+/* ── Responsive: mini (width < 350px) ────────────────────────── */
+
+.cal-mini .cal-day-name {
+    display: none;
+}
+
+.cal-mini .cal-day-header {
+    padding: 2px 0;
+}
+
+.cal-mini .cal-day-date {
+    display: none;
+}
+
+.cal-mini .cal-day-header-today .cal-day-date {
+    display: none;
+}
+
+.cal-mini .cal-time-gutter {
+    width: 40px;
+}
+
+.cal-mini .cal-event-time {
+    display: none;
+}
+
+.cal-mini .cal-event-title {
+    font-size: 10px;
+}
+
+.cal-mini .cal-allday-row {
+    display: none;
+}
+
+/* ── Responsive: short (height < 450px) ──────────────────────── */
+
+.cal-short .cal-day-header {
+    padding: 2px 0;
+}
+
+.cal-short .cal-day-date {
+    display: none;
+}
+
+.cal-short .cal-day-header-today .cal-day-date {
+    display: none;
+}
+
+.cal-short .cal-allday-row {
+    display: none;
 }

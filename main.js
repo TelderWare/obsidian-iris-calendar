@@ -95,6 +95,7 @@ function dateKey(date) {
 var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
               'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 var DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+var DAYS_SHORT = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 
 // ── Default event color ───────────────────────────────────────────
 var DEFAULT_COLOR = 'accent';
@@ -404,11 +405,30 @@ class CalendarView extends obsidian.ItemView {
             }
         }));
 
+        // ── Responsive size classes via ResizeObserver ──
+        this._sizeClass = '';
+        this._heightClass = '';
+        this._resizeObserver = new ResizeObserver(function (entries) {
+            var entry = entries[0];
+            if (!entry) return;
+            var w = entry.contentRect.width;
+            var h = entry.contentRect.height;
+            var wClass = w < 350 ? 'cal-mini' : w < 550 ? 'cal-compact' : '';
+            var hClass = h < 450 ? 'cal-short' : '';
+            if (wClass !== self._sizeClass || hClass !== self._heightClass) {
+                self._sizeClass = wClass;
+                self._heightClass = hClass;
+                self.render();
+            }
+        });
+        this._resizeObserver.observe(this.contentEl);
+
     }
 
     async onClose() {
         if (this._renderTimer) clearTimeout(this._renderTimer);
         if (this.nowLineInterval) clearInterval(this.nowLineInterval);
+        if (this._resizeObserver) this._resizeObserver.disconnect();
     }
 
     // ── Check if view is in a sidebar ──────────────────────────
@@ -562,6 +582,8 @@ class CalendarView extends obsidian.ItemView {
         container.removeClass('cal-slide-prev');
         container.addClass('cal-container');
         if (this.isSidebar()) container.addClass('cal-sidebar');
+        if (this._sizeClass) container.addClass(this._sizeClass);
+        if (this._heightClass) container.addClass(this._heightClass);
         if (slideDir) {
             void container.offsetWidth; // force reflow to restart animation
             container.addClass('cal-slide-' + slideDir);
@@ -573,9 +595,14 @@ class CalendarView extends obsidian.ItemView {
 
         this.renderHeader(container);
         this.renderWeekGrid(container);
+        var newBody = container.querySelector('.cal-body');
         if (savedScroll !== null) {
-            var newBody = container.querySelector('.cal-body');
             if (newBody) newBody.scrollTop = savedScroll;
+        } else if (newBody) {
+            // First render: scroll so current hour is near the top, with 1h padding
+            var now = new Date();
+            var targetHour = Math.max(0, now.getHours() - 1);
+            newBody.scrollTop = targetHour * HOUR_HEIGHT;
         }
     }
 
@@ -668,7 +695,8 @@ class CalendarView extends obsidian.ItemView {
             var dayHeader = headerRow.createDiv({ cls: 'cal-day-header' });
             if (dk === todayStr) dayHeader.addClass('cal-day-header-today');
             var dayNameIdx = (colDate.getDay() + 6) % 7;
-            dayHeader.createDiv({ cls: 'cal-day-name', text: DAYS[dayNameIdx] });
+            var dayNames = this._sizeClass === 'cal-compact' || this._sizeClass === 'cal-mini' ? DAYS_SHORT : DAYS;
+            dayHeader.createDiv({ cls: 'cal-day-name', text: dayNames[dayNameIdx] });
             dayHeader.createDiv({ cls: 'cal-day-date', text: String(colDate.getDate()) });
             dayHeader.style.cursor = 'pointer';
             (function (key) {

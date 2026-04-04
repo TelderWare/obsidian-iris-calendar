@@ -362,19 +362,37 @@ class CalendarView extends obsidian.ItemView {
     async onOpen() {
         this.render();
 
-        // Live-update when vault changes (debounced)
-        this.registerEvent(this.app.vault.on('create', () => this.scheduleRender()));
-        this.registerEvent(this.app.vault.on('delete', () => this.scheduleRender()));
-        this.registerEvent(this.app.vault.on('rename', () => this.scheduleRender()));
-        this.registerEvent(this.app.vault.on('modify', () => this.scheduleRender()));
-        this.registerEvent(this.app.metadataCache.on('changed', () => this.scheduleRender()));
+        var self = this;
+
+        var isRelevantFile = function (path) {
+            if (path.startsWith('Modules/')) return true;
+            var s = self.plugin.settings;
+            var eventFolders = s.folders;
+            var taskFolders = s.taskFolders;
+            if (eventFolders.length === 0 && taskFolders.length === 0) return true;
+            if (eventFolders.length > 0 && inFolders(path, eventFolders)) return true;
+            if (taskFolders.length > 0 && inFolders(path, taskFolders)) return true;
+            return false;
+        };
+        var filteredRender = function (file) {
+            if (file && file.path) {
+                if (!isRelevantFile(file.path)) return;
+                if (file.path.startsWith('Modules/')) self.plugin._moduleColorsDirty = true;
+            }
+            self.scheduleRender();
+        };
+        this.registerEvent(this.app.vault.on('create', filteredRender));
+        this.registerEvent(this.app.vault.on('delete', filteredRender));
+        this.registerEvent(this.app.vault.on('rename', filteredRender));
+        this.registerEvent(this.app.vault.on('modify', filteredRender));
+        this.registerEvent(this.app.metadataCache.on('changed', filteredRender));
 
         // Update "now" line every minute
         this.nowLineInterval = setInterval(() => this.updateNowLine(), 60000);
 
         // Re-render when moved to/from sidebar
-        var self = this;
-        this.sidebarInterval = setInterval(function () {
+        this.lastSidebarState = this.isSidebar();
+        this.registerEvent(this.app.workspace.on('layout-change', function () {
             var isSidebar = self.isSidebar();
             if (isSidebar !== self.lastSidebarState) {
                 self.lastSidebarState = isSidebar;
@@ -384,15 +402,13 @@ class CalendarView extends obsidian.ItemView {
                 }
                 self.render();
             }
-        }, 300);
-        this.lastSidebarState = this.isSidebar();
+        }));
 
     }
 
     async onClose() {
         if (this._renderTimer) clearTimeout(this._renderTimer);
         if (this.nowLineInterval) clearInterval(this.nowLineInterval);
-        if (this.sidebarInterval) clearInterval(this.sidebarInterval);
     }
 
     // ── Check if view is in a sidebar ──────────────────────────
@@ -411,8 +427,10 @@ class CalendarView extends obsidian.ItemView {
 
     // ── Collect events from vault ────────────────────────────────
     getEvents() {
-        // Re-sync module colors on every render
-        this.plugin.syncColorsFromModules();
+        if (this.plugin._moduleColorsDirty) {
+            this.plugin.syncColorsFromModules();
+            this.plugin._moduleColorsDirty = false;
+        }
 
         var events = [];
         var files = this.app.vault.getMarkdownFiles();
@@ -771,14 +789,13 @@ class CalendarView extends obsidian.ItemView {
             }
         }
 
-        // Match header padding to body scrollbar width
         var sbWidth = body.offsetWidth - body.clientWidth;
         headerRow.style.paddingRight = sbWidth + 'px';
         if (allDayRow) allDayRow.style.paddingRight = sbWidth + 'px';
     }
 
-    yToHour(e, dayCol) {
-        var rect = dayCol.getBoundingClientRect();
+    yToHour(e, dayCol, rect) {
+        if (!rect) rect = dayCol.getBoundingClientRect();
         var y = e.clientY - rect.top;
         var hour = snapToQuarter(START_HOUR + y / HOUR_HEIGHT);
         return Math.max(START_HOUR, Math.min(END_HOUR, hour));
@@ -799,7 +816,8 @@ class CalendarView extends obsidian.ItemView {
             dayCol: dayCol, dateStr: dateStr, body: body,
             startHour: hour, currentHour: hour,
             el: result.el, titleEl: result.titleEl, timeEl: result.timeEl, shape: result.shape,
-            isInstant: true, hex: hex
+            isInstant: true, hex: hex,
+            colRect: dayCol.getBoundingClientRect()
         };
 
         this._onDragMove = function (ev) { self.onDragMove(ev); };
@@ -811,7 +829,7 @@ class CalendarView extends obsidian.ItemView {
     onDragMove(e) {
         var drag = this._drag;
         if (!drag) return;
-        drag.currentHour = this.yToHour(e, drag.dayCol);
+        drag.currentHour = this.yToHour(e, drag.dayCol, drag.colRect);
         this.updateDragPreview();
     }
 
@@ -1367,9 +1385,13 @@ class CalendarView extends obsidian.ItemView {
             }
         }
 
+        var cachedColRect = null;
+
         function onMouseDown(e) {
             e.preventDefault();
             e.stopPropagation();
+
+            cachedColRect = dayCol.getBoundingClientRect();
 
             if (resizeTop && e.target === resizeTop) {
                 dragType = 'resize-top';
@@ -1377,8 +1399,7 @@ class CalendarView extends obsidian.ItemView {
                 dragType = 'resize-bottom';
             } else {
                 dragType = 'move';
-                var colRect = dayCol.getBoundingClientRect();
-                var clickHour = START_HOUR + (e.clientY - colRect.top) / HOUR_HEIGHT;
+                var clickHour = START_HOUR + (e.clientY - cachedColRect.top) / HOUR_HEIGHT;
                 dragOffset = clickHour - currentStart;
             }
 
@@ -1387,7 +1408,7 @@ class CalendarView extends obsidian.ItemView {
         }
 
         function onMouseMove(e) {
-            var colRect = dayCol.getBoundingClientRect();
+            var colRect = cachedColRect;
             var mouseHour = START_HOUR + (e.clientY - colRect.top) / HOUR_HEIGHT;
             var currentEnd = currentStart + currentDur / 60;
 
@@ -1517,6 +1538,7 @@ class CalendarView extends obsidian.ItemView {
 class CalendarPlugin extends obsidian.Plugin {
     async onload() {
         var self = this;
+        this._moduleColorsDirty = true;
 
         await this.loadSettings();
 
@@ -1601,9 +1623,16 @@ class CalendarPlugin extends obsidian.Plugin {
         }));
 
         // Annotate date frontmatter with relative labels
-        this.registerInterval(window.setInterval(function () {
-            self.processDateProperties();
-        }, 1000));
+        this._datePropsTimer = null;
+        var scheduleDateProps = function () {
+            if (self._datePropsTimer) return;
+            self._datePropsTimer = setTimeout(function () {
+                self._datePropsTimer = null;
+                self.processDateProperties();
+            }, 200);
+        };
+        this.registerEvent(this.app.metadataCache.on('changed', scheduleDateProps));
+        this.registerEvent(this.app.workspace.on('active-leaf-change', scheduleDateProps));
 
         // Open sidebar on startup
         this.app.workspace.onLayoutReady(function () {
@@ -1970,6 +1999,7 @@ class CalendarPlugin extends obsidian.Plugin {
     }
 
     onunload() {
+        if (this._datePropsTimer) clearTimeout(this._datePropsTimer);
         this.app.workspace.detachLeavesOfType(VIEW_TYPE_CALENDAR);
     }
 }

@@ -152,22 +152,6 @@
     overflow-y: auto;
 }
 
-.cal-body::-webkit-scrollbar {
-    width: 0;
-}
-
-.cal-body:hover::-webkit-scrollbar {
-    width: 6px;
-}
-
-.cal-body::-webkit-scrollbar-thumb {
-    background: var(--background-modifier-border);
-    border-radius: 3px;
-}
-
-.cal-body::-webkit-scrollbar-track {
-    background: transparent;
-}
 
 .cal-row {
     display: flex;
@@ -254,6 +238,38 @@
 }
 
 /* ── Now line ─────────────────────────────────────────────────── */
+/* ── Multi-day event segments ─────���──────────────────────────── */
+.cal-event-multiday-start,
+.cal-event-line.cal-event-multiday-start {
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+}
+
+.cal-event-multiday-end,
+.cal-event-line.cal-event-multiday-end {
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
+}
+
+.cal-event-multiday-mid,
+.cal-event-line.cal-event-multiday-mid {
+    border-radius: 0;
+}
+
+.cal-event-multiday-start .cal-event-line-shape {
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+}
+
+.cal-event-multiday-end .cal-event-line-shape {
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
+}
+
+.cal-event-multiday-mid .cal-event-line-shape {
+    border-radius: 0;
+}
+
 .cal-now-line {
     position: absolute;
     left: 0;

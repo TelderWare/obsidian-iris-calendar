@@ -63,13 +63,16 @@ function parseTime(str) {
     var h = parseInt(parts[0], 10);
     var m = parseInt(parts[1], 10);
     if (isNaN(h) || isNaN(m)) return null;
+    if (h < 0 || h > 23 || m < 0 || m > 59) return null;
     return h + m / 60;
 }
 
 // ── Parse time value (string or YAML sexagesimal number) ─────────
 function parseTimeVal(val) {
     if (typeof val === 'number') {
-        return Math.floor(val / 60) + (val % 60) / 60;
+        var result = Math.floor(val / 60) + (val % 60) / 60;
+        if (result < 0 || result >= 24) return null;
+        return result;
     }
     return parseTime(val);
 }
@@ -251,6 +254,73 @@ function snapToQuarter(hours) {
     return Math.round(hours * 4) / 4;
 }
 
+// ── Compute overlap layout for a list of day events ─────────────
+// Returns an array of { event, colIndex, totalCols } in render order.
+function computeOverlapLayout(dayEvents) {
+    if (dayEvents.length === 0) return [];
+
+    // Sort by start time ascending, then longer events first
+    var sorted = dayEvents.slice().sort(function (a, b) {
+        if (a.startTime !== b.startTime) return a.startTime - b.startTime;
+        return b.durationMin - a.durationMin;
+    });
+
+    // Build overlap groups: events that transitively overlap share a group
+    var groups = [];
+    var currentGroup = [sorted[0]];
+    var groupEnd = sorted[0].startTime + (sorted[0].durationMin || 1) / 60;
+
+    for (var i = 1; i < sorted.length; i++) {
+        var ev = sorted[i];
+        if (ev.startTime < groupEnd) {
+            // Overlaps with current group
+            currentGroup.push(ev);
+            var evEnd = ev.startTime + (ev.durationMin || 1) / 60;
+            if (evEnd > groupEnd) groupEnd = evEnd;
+        } else {
+            groups.push(currentGroup);
+            currentGroup = [ev];
+            groupEnd = ev.startTime + (ev.durationMin || 1) / 60;
+        }
+    }
+    groups.push(currentGroup);
+
+    // Assign columns within each group
+    var result = [];
+    for (var g = 0; g < groups.length; g++) {
+        var group = groups[g];
+        var columns = []; // columns[col] = end time of last event in that column
+
+        for (var j = 0; j < group.length; j++) {
+            var ev = group[j];
+            var evEnd = ev.startTime + (ev.durationMin || 1) / 60;
+
+            // Find first column where this event fits (no overlap)
+            var placed = false;
+            for (var c = 0; c < columns.length; c++) {
+                if (ev.startTime >= columns[c]) {
+                    columns[c] = evEnd;
+                    result.push({ event: ev, colIndex: c, totalCols: 0 });
+                    placed = true;
+                    break;
+                }
+            }
+            if (!placed) {
+                result.push({ event: ev, colIndex: columns.length, totalCols: 0 });
+                columns.push(evEnd);
+            }
+        }
+
+        // Set totalCols for all events in this group
+        var totalCols = columns.length;
+        for (var k = result.length - group.length; k < result.length; k++) {
+            result[k].totalCols = totalCols;
+        }
+    }
+
+    return result;
+}
+
 // ── Format fractional hours as "HH:MM" ──────────────────────────
 function fmtTime(h) {
     var hh = Math.floor(h);
@@ -405,6 +475,71 @@ class CalendarView extends obsidian.ItemView {
             }
         }));
 
+        // ── Keyboard shortcuts ──
+        this.contentEl.tabIndex = 0;
+        this._onKeyDown = function (e) {
+            // Ignore when typing in inputs or contenteditable
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA'
+                || e.target.isContentEditable) return;
+
+            if (e.key === 't' || e.key === 'T') {
+                e.preventDefault();
+                self.sidebarUserNavigated = false;
+                self.weekStart = self.isSidebar() ? new Date() : getMonday(new Date());
+                self.weekStart.setHours(0, 0, 0, 0);
+                self.focusedDate = dateKey(new Date());
+                self.render();
+            } else if (e.key === 'ArrowLeft') {
+                e.preventDefault();
+                if (self.isSidebar()) self.sidebarUserNavigated = true;
+                var d = new Date(self.weekStart);
+                d.setDate(d.getDate() - self.navStep());
+                self.weekStart = self.isSidebar() ? d : getMonday(d);
+                self._slideDirection = 'prev';
+                self.render();
+            } else if (e.key === 'ArrowRight') {
+                e.preventDefault();
+                if (self.isSidebar()) self.sidebarUserNavigated = true;
+                var d = new Date(self.weekStart);
+                d.setDate(d.getDate() + self.navStep());
+                self.weekStart = self.isSidebar() ? d : getMonday(d);
+                self._slideDirection = 'next';
+                self.render();
+            } else if (e.key === 'n' || e.key === 'N') {
+                e.preventDefault();
+                // Create event at current hour on focused day
+                var body = self.contentEl.querySelector('.cal-body');
+                var cols = self.contentEl.querySelectorAll('.cal-day-col');
+                if (!body || cols.length === 0) return;
+                var visibleDays = self.getVisibleDays();
+                var targetCol = null;
+                for (var i = 0; i < visibleDays.length; i++) {
+                    var colDate = new Date(self.weekStart);
+                    colDate.setDate(colDate.getDate() + visibleDays[i]);
+                    if (dateKey(colDate) === self.focusedDate) {
+                        targetCol = cols[i];
+                        break;
+                    }
+                }
+                if (!targetCol) targetCol = cols[0];
+                var now = new Date();
+                var hour = snapToQuarter(now.getHours() + now.getMinutes() / 60);
+                var hex = resolveColor(self.plugin.settings.defaultColor);
+                var result = self.buildEventDOM(targetCol, hour, 0, hex, '', { isDraft: true });
+                if (result) {
+                    // Find the date string for the target column
+                    var targetDateStr = self.focusedDate;
+                    self.transitionToDraft({
+                        dayCol: targetCol, dateStr: targetDateStr, body: body,
+                        startHour: hour, currentHour: hour,
+                        el: result.el, titleEl: result.titleEl, timeEl: result.timeEl,
+                        shape: result.shape, isInstant: true, hex: hex
+                    }, hour, hour);
+                }
+            }
+        };
+        this.contentEl.addEventListener('keydown', this._onKeyDown);
+
         // ── Responsive size classes via ResizeObserver ──
         this._sizeClass = '';
         this._heightClass = '';
@@ -429,6 +564,7 @@ class CalendarView extends obsidian.ItemView {
         if (this._renderTimer) clearTimeout(this._renderTimer);
         if (this.nowLineInterval) clearInterval(this.nowLineInterval);
         if (this._resizeObserver) this._resizeObserver.disconnect();
+        if (this._onKeyDown) this.contentEl.removeEventListener('keydown', this._onKeyDown);
     }
 
     // ── Check if view is in a sidebar ──────────────────────────
@@ -485,30 +621,70 @@ class CalendarView extends obsidian.ItemView {
             var startTime = parseTimeVal(timeVal);
             if (startTime === null) continue;
 
-            // Duration: from "duration" field, or computed from endTime
+            // Duration: from "duration" field, or computed from endTime/endDate
             var durationMin;
+            var endDateStr = fm.endDate ? fmDateStr(fm.endDate) : null;
             var endTimeVal = fm.endTime;
-            if (endTimeVal) {
-                var endTime = parseTimeVal(endTimeVal);
-                if (endTime !== null && endTime >= startTime) {
-                    durationMin = (endTime - startTime) * 60;
+
+            if (endDateStr && endDateStr !== dateStr) {
+                // Multi-day event: compute total duration across days
+                var startParts = dateStr.split('-');
+                var endParts = endDateStr.split('-');
+                var startDate = new Date(+startParts[0], +startParts[1] - 1, +startParts[2]);
+                var endDate = new Date(+endParts[0], +endParts[1] - 1, +endParts[2]);
+                var endTimeHours = endTimeVal ? parseTimeVal(endTimeVal) : 24;
+                if (endTimeHours === null) endTimeHours = 24;
+
+                // Generate segments for each day
+                var title = fm.displayTitle || formatTitle(file.basename);
+                var folderLabel = matchedFolder ? matchedFolder.label : null;
+                var loc = fm.location || null;
+                var cursor = new Date(startDate);
+                var dayIndex = 0;
+                while (cursor <= endDate) {
+                    var dk = dateKey(cursor);
+                    var isFirst = dayIndex === 0;
+                    var isLast = dk === endDateStr;
+                    var segStart = isFirst ? startTime : 0;
+                    var segEnd = isLast ? endTimeHours : 24;
+                    var segDur = (segEnd - segStart) * 60;
+                    if (segDur > 0) {
+                        events.push({
+                            file: file, fm: fm, date: dk,
+                            startTime: segStart, durationMin: segDur,
+                            title: title, folderLabel: folderLabel, location: loc,
+                            isMultiDayStart: isFirst && !isLast,
+                            isMultiDayEnd: isLast && !isFirst,
+                            isMultiDayMiddle: !isFirst && !isLast,
+                        });
+                    }
+                    cursor.setDate(cursor.getDate() + 1);
+                    dayIndex++;
+                    if (dayIndex > 30) break; // safety limit
+                }
+            } else {
+                if (endTimeVal) {
+                    var endTime = parseTimeVal(endTimeVal);
+                    if (endTime !== null && endTime >= startTime) {
+                        durationMin = (endTime - startTime) * 60;
+                    } else {
+                        durationMin = parseDuration(fm.duration);
+                    }
                 } else {
                     durationMin = parseDuration(fm.duration);
                 }
-            } else {
-                durationMin = parseDuration(fm.duration);
-            }
 
-            events.push({
-                file: file,
-                fm: fm,
-                date: dateStr,
-                startTime: startTime,
-                durationMin: durationMin,
-                title: fm.displayTitle || formatTitle(file.basename),
-                folderLabel: matchedFolder ? matchedFolder.label : null,
-                location: fm.location || null,
-            });
+                events.push({
+                    file: file,
+                    fm: fm,
+                    date: dateStr,
+                    startTime: startTime,
+                    durationMin: durationMin,
+                    title: fm.displayTitle || formatTitle(file.basename),
+                    folderLabel: matchedFolder ? matchedFolder.label : null,
+                    location: fm.location || null,
+                });
+            }
         }
         return events;
     }
@@ -791,11 +967,12 @@ class CalendarView extends obsidian.ItemView {
                 dayCol.addClass('cal-day-col-today');
             }
 
-            // Place events
+            // Place events (with overlap stacking)
             var dayEvents = events.filter(function (e) { return e.date === dk; });
-            for (var i = 0; i < dayEvents.length; i++) {
-                var ev = dayEvents[i];
-                this.renderEvent(dayCol, ev, i);
+            var layout = computeOverlapLayout(dayEvents);
+            for (var i = 0; i < layout.length; i++) {
+                var item = layout[i];
+                this.renderEvent(dayCol, item.event, i, item.colIndex, item.totalCols);
             }
 
             // Place journey blocks (map mode — delegates to iris-maps plugin)
@@ -1077,18 +1254,35 @@ class CalendarView extends obsidian.ItemView {
             timeEl = el.createDiv({ cls: 'cal-event-time', text: timeStr });
         }
 
+        // Multi-day segment styling
+        if (opts.multiDayStart) el.classList.add('cal-event-multiday-start');
+        if (opts.multiDayEnd) el.classList.add('cal-event-multiday-end');
+        if (opts.multiDayMiddle) el.classList.add('cal-event-multiday-mid');
+
         return { el: el, titleEl: titleEl, timeEl: timeEl, shape: shape, top: top, height: height };
     }
 
-    renderEvent(dayCol, ev) {
+    renderEvent(dayCol, ev, index, colIndex, totalCols) {
         var self = this;
         var rules = this.plugin.settings.colorRules;
         var hex = resolveColor(matchColorRules(rules, ev.file, ev.fm) || this.plugin.settings.defaultColor);
 
-        var result = this.buildEventDOM(dayCol, ev.startTime, ev.durationMin, hex, ev.title, { folderLabel: ev.folderLabel });
+        var opts = { folderLabel: ev.folderLabel };
+        if (ev.isMultiDayStart) opts.multiDayStart = true;
+        if (ev.isMultiDayEnd) opts.multiDayEnd = true;
+        if (ev.isMultiDayMiddle) opts.multiDayMiddle = true;
+        var result = this.buildEventDOM(dayCol, ev.startTime, ev.durationMin, hex, ev.title, opts);
         if (!result) return;
 
         var el = result.el;
+
+        // Apply overlap layout
+        if (totalCols > 1) {
+            var pct = 100 / totalCols;
+            el.style.left = (colIndex * pct) + '%';
+            el.style.width = 'calc(' + pct + '% - 2px)';
+            el.style.right = 'auto';
+        }
 
         el.addEventListener('mouseenter', function () { el.classList.add('cal-event-hover'); });
         el.addEventListener('mouseleave', function () { el.classList.remove('cal-event-hover'); });

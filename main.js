@@ -861,8 +861,7 @@ class CalendarView extends obsidian.ItemView {
             var dayHeader = headerRow.createDiv({ cls: 'cal-day-header' });
             if (dk === todayStr) dayHeader.addClass('cal-day-header-today');
             var dayNameIdx = (colDate.getDay() + 6) % 7;
-            var dayNames = this._sizeClass === 'cal-compact' || this._sizeClass === 'cal-mini' ? DAYS_SHORT : DAYS;
-            dayHeader.createDiv({ cls: 'cal-day-name', text: dayNames[dayNameIdx] });
+            dayHeader.createDiv({ cls: 'cal-day-name', text: DAYS[dayNameIdx] });
             dayHeader.createDiv({ cls: 'cal-day-date', text: String(colDate.getDate()) });
             dayHeader.style.cursor = 'pointer';
             (function (key) {

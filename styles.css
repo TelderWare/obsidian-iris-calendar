@@ -854,6 +854,18 @@
     padding: 4px 0;
 }
 
+.cal-compact .cal-day-name {
+    display: none;
+}
+
+.cal-compact .cal-day-date {
+    display: none;
+}
+
+.cal-compact .cal-day-header-today .cal-day-date {
+    display: none;
+}
+
 
 .cal-compact .cal-time-gutter {
     width: 40px;

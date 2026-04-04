@@ -650,9 +650,12 @@ class CalendarView extends obsidian.ItemView {
 
         var grid = container.createDiv({ cls: 'cal-grid' });
 
-        // ── Day headers row ──
-        var headerRow = grid.createDiv({ cls: 'cal-header-row' });
-        headerRow.createDiv({ cls: 'cal-time-gutter cal-corner' }); // empty corner
+        // ── Body (scrollable — header and allday are sticky inside) ──
+        var body = grid.createDiv({ cls: 'cal-body' });
+
+        // ── Day headers row (sticky) ──
+        var headerRow = body.createDiv({ cls: 'cal-header-row' });
+        headerRow.createDiv({ cls: 'cal-time-gutter cal-corner' });
 
         var todayStr = dateKey(new Date());
         var visibleDays = this.getVisibleDays();
@@ -696,7 +699,8 @@ class CalendarView extends obsidian.ItemView {
 
         var allDayRow = null;
         if (hasAllDay) {
-            allDayRow = grid.createDiv({ cls: 'cal-allday-row' });
+            allDayRow = body.createDiv({ cls: 'cal-allday-row' });
+            allDayRow.style.top = headerRow.offsetHeight + 'px';
             allDayRow.createDiv({ cls: 'cal-time-gutter cal-allday-gutter' });
 
             for (var bi = 0; bi < visibleDays.length; bi++) {
@@ -717,9 +721,6 @@ class CalendarView extends obsidian.ItemView {
                 }
             }
         }
-
-        // ── Body (scrollable) ──
-        var body = grid.createDiv({ cls: 'cal-body' });
 
         // ── Time gutter + day columns ──
         var row = body.createDiv({ cls: 'cal-row' });
@@ -789,9 +790,6 @@ class CalendarView extends obsidian.ItemView {
             }
         }
 
-        var sbWidth = body.offsetWidth - body.clientWidth;
-        headerRow.style.paddingRight = sbWidth + 'px';
-        if (allDayRow) allDayRow.style.paddingRight = sbWidth + 'px';
     }
 
     yToHour(e, dayCol, rect) {

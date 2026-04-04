@@ -90,6 +90,10 @@
     display: flex;
     flex-shrink: 0;
     border-bottom: none;
+    position: sticky;
+    top: 0;
+    z-index: 4;
+    background: var(--background-primary);
 }
 
 
@@ -145,8 +149,7 @@
 /* ── Scrollable body ──────────────────────────────────────────── */
 .cal-body {
     flex: 1;
-    overflow-y: scroll;
-    scrollbar-gutter: stable;
+    overflow-y: auto;
 }
 
 .cal-row {
@@ -253,8 +256,9 @@
     display: flex;
     flex-shrink: 0;
     border-bottom: 1px solid var(--background-modifier-border);
-    position: relative;
+    position: sticky;
     z-index: 3;
+    background: var(--background-primary);
 }
 
 .cal-allday-gutter {

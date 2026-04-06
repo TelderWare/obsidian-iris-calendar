@@ -45,12 +45,12 @@
 
 
 .cal-nav-btn {
-    background: none;
+    background: transparent;
     border: none;
+    box-shadow: none;
     color: var(--text-muted);
     cursor: pointer;
     padding: 4px;
-    border-radius: 50%;
     line-height: 0;
     display: inline-flex;
     align-items: center;
@@ -62,7 +62,6 @@
 
 .cal-nav-btn:hover {
     color: var(--text-normal);
-    background: var(--background-modifier-hover);
 }
 
 .cal-nav-btn svg {
@@ -199,9 +198,14 @@
     border-radius: 4px;
     padding: 3px 6px;
     cursor: pointer;
-    overflow: hidden;
+    overflow: clip;
     z-index: 1;
     transition: box-shadow 0.2s ease, z-index 0s;
+}
+
+.cal-event-inner {
+    position: sticky;
+    top: var(--cal-sticky-top, 0px);
 }
 
 .cal-event.cal-event-hover {
@@ -679,6 +683,7 @@
     align-items: flex-start;
     padding: 0;
     border-radius: 4px;
+    overflow: clip;
     transition: background 0.2s ease, box-shadow 0.2s ease, z-index 0s;
 }
 
@@ -704,6 +709,8 @@
     margin-left: 3px;
     padding-left: 4px;
     overflow: hidden;
+    position: sticky;
+    top: var(--cal-sticky-top, 0px);
 }
 
 .cal-event-line .cal-event-folder,
@@ -876,17 +883,6 @@
     padding-right: 4px;
 }
 
-.cal-compact .cal-event-title {
-    font-size: 11px;
-}
-
-.cal-compact .cal-event-folder {
-    display: none;
-}
-
-.cal-compact .cal-task-label {
-    display: none;
-}
 
 .cal-compact .cal-allday-gutter {
     display: none;
@@ -914,13 +910,6 @@
     width: 40px;
 }
 
-.cal-mini .cal-event-time {
-    display: none;
-}
-
-.cal-mini .cal-event-title {
-    font-size: 10px;
-}
 
 .cal-mini .cal-allday-row {
     display: none;

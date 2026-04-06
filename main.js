@@ -799,12 +799,12 @@ class CalendarView extends obsidian.ItemView {
         var header = container.createDiv({ cls: 'cal-header' });
 
         // Prev
-        var prevBtn = header.createEl('button', { cls: 'cal-nav-btn' });
+        var prevBtn = header.createDiv({ cls: 'cal-nav-btn clickable-icon' });
         obsidian.setIcon(prevBtn, 'chevron-left');
         prevBtn.addEventListener('click', function () { self.navigate('prev'); });
 
         // Next
-        var nextBtn = header.createEl('button', { cls: 'cal-nav-btn' });
+        var nextBtn = header.createDiv({ cls: 'cal-nav-btn clickable-icon' });
         obsidian.setIcon(nextBtn, 'chevron-right');
         nextBtn.addEventListener('click', function () { self.navigate('next'); });
 
@@ -915,8 +915,12 @@ class CalendarView extends obsidian.ItemView {
             }
         }
 
+        // ── Sticky offset for event content ──
+        var stickyTop = headerRow.offsetHeight + (allDayRow ? allDayRow.offsetHeight : 0);
+
         // ── Time gutter + day columns ──
         var row = body.createDiv({ cls: 'cal-row' });
+        row.style.setProperty('--cal-sticky-top', stickyTop + 'px');
         var gutter = row.createDiv({ cls: 'cal-time-gutter' });
 
         // Hour labels
@@ -1236,11 +1240,12 @@ class CalendarView extends obsidian.ItemView {
             el.dataset.bg = color.bg;
             el.dataset.bgSolid = hex;
 
+            var inner = el.createDiv({ cls: 'cal-event-inner' });
             if (opts.folderLabel) {
-                el.createDiv({ cls: 'cal-event-folder', text: opts.folderLabel });
+                inner.createDiv({ cls: 'cal-event-folder', text: opts.folderLabel });
             }
-            titleEl = el.createDiv({ cls: 'cal-event-title', text: title || '' });
-            timeEl = el.createDiv({ cls: 'cal-event-time', text: timeStr });
+            titleEl = inner.createDiv({ cls: 'cal-event-title', text: title || '' });
+            timeEl = inner.createDiv({ cls: 'cal-event-time', text: timeStr });
         }
 
         // Multi-day segment styling

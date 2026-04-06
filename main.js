@@ -1850,21 +1850,6 @@ class CalendarPlugin extends obsidian.Plugin {
         this.registerEvent(this.app.metadataCache.on('changed', scheduleDateProps));
         this.registerEvent(this.app.workspace.on('active-leaf-change', scheduleDateProps));
 
-        // Open sidebar on startup
-        this.app.workspace.onLayoutReady(function () {
-            self.activateSidebar();
-        });
-    }
-
-    async activateSidebar() {
-        var existing = this.app.workspace.getLeavesOfType(VIEW_TYPE_CALENDAR);
-        for (var i = 0; i < existing.length; i++) {
-            var root = existing[i].getRoot();
-            if (root !== this.app.workspace.rootSplit) return; // already in a sidebar
-        }
-        var leaf = this.app.workspace.getRightLeaf(false);
-        await leaf.setViewState({ type: VIEW_TYPE_CALENDAR, active: true });
-        this.app.workspace.revealLeaf(leaf);
     }
 
     processDateProperties() {

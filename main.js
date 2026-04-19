@@ -350,6 +350,7 @@ var DEFAULT_SETTINGS = {
     mapMode: false,    // show journey blocks between events at different locations
     gcalFeeds: [],              // [{url: string, label: string}] — Google Calendar ICS feed URLs
     gcalSyncIntervalMin: 30,   // auto-sync interval in minutes (0 = manual only)
+    eventsFolder: 'Events',    // vault folder where quick-created event notes are saved
 };
 
 // ── ICS parser ──────────────────────────────────────────────────
@@ -1159,7 +1160,7 @@ class CalendarView extends obsidian.ItemView {
             var title = titleEl.textContent.trim();
             el.classList.add('cal-event-committing');
             setTimeout(function () { el.remove(); }, 150);
-            var folder = 'Events';
+            var folder = self.plugin.settings.eventsFolder || 'Events';
             await self.plugin.ensureFolder(folder);
             var safeName = dateStr + ' ' + startStr.replace(':', '-');
             var filePath = folder + '/' + safeName + '.md';
@@ -1972,7 +1973,7 @@ class CalendarPlugin extends obsidian.Plugin {
         this.weekMap = {};
         try {
             var adapter = this.app.vault.adapter;
-            var irisDataPath = this.app.vault.configDir + '/plugins/iris/data.json';
+            var irisDataPath = this.app.vault.configDir + '/plugins/obsidian-iris-course/data.json';
             var exists = await adapter.exists(irisDataPath);
             if (exists) {
                 var raw = await adapter.read(irisDataPath);
@@ -2421,6 +2422,19 @@ class CalendarSettingTab extends obsidian.PluginSettingTab {
                     }
                     text.setValue('');
                     self.display();
+                });
+            });
+
+        // ── Events Folder ───────────────────────────────────────
+        new obsidian.Setting(containerEl)
+            .setName('Events folder')
+            .setDesc('Vault folder where quick-created event notes are saved.')
+            .addText(function (text) {
+                text.setPlaceholder('Events');
+                text.setValue(self.plugin.settings.eventsFolder || '');
+                text.onChange(async function (val) {
+                    self.plugin.settings.eventsFolder = val.trim() || 'Events';
+                    await self.plugin.saveSettings();
                 });
             });
 

@@ -433,7 +433,11 @@ class CalendarView extends obsidian.ItemView {
     }
 
     async onOpen() {
+        this._forceScrollToNow = true;
         this.render();
+        // Keep _forceScrollToNow alive through initial vault-event re-renders
+        var self2 = this;
+        setTimeout(function() { self2._forceScrollToNow = false; }, 1000);
 
         var self = this;
 
@@ -712,23 +716,23 @@ class CalendarView extends obsidian.ItemView {
             var rawDate = fm.closes;
             if (!rawDate) continue;
 
-            // Hide completed daily tasks from the calendar
-            if (fm.dailytask === true && fm.status === 'completed') continue;
-
             var dateStr = fmDateStr(rawDate);
             if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) continue;
 
             // Optional time via "closeTime"
             var timeVal = fm.closeTime;
-            var startTime = timeVal ? parseTimeVal(timeVal) : null;
+            var endTime = timeVal ? parseTimeVal(timeVal) : null;
+            var durationMin = parseDuration(fm.duration);
 
             tasks.push({
                 file: file,
                 fm: fm,
                 date: dateStr,
-                startTime: startTime,
+                startTime: endTime,
+                durationMin: durationMin,
                 title: fm.displayTitle || formatTitle(file.basename),
                 folderLabel: matchedFolder ? matchedFolder.label : null,
+                completed: fm.status === 'completed',
             });
         }
         return tasks;
@@ -746,8 +750,11 @@ class CalendarView extends obsidian.ItemView {
         var container = this.contentEl;
         var slideDir = this._slideDirection;
         this._slideDirection = null;
+        // Read scroll from tracked property (immune to hidden-element bugs)
+        // rather than the DOM element which can return 0 when not visible
         var prevBody = container.querySelector('.cal-body');
-        var savedScroll = prevBody ? prevBody.scrollTop : null;
+        var savedScroll = this._trackedScroll != null ? this._trackedScroll
+            : prevBody ? prevBody.scrollTop : null;
         container.empty();
         container.removeClass('cal-slide-next');
         container.removeClass('cal-slide-prev');
@@ -767,13 +774,26 @@ class CalendarView extends obsidian.ItemView {
         this.renderHeader(container);
         this.renderWeekGrid(container);
         var newBody = container.querySelector('.cal-body');
-        if (savedScroll !== null) {
-            if (newBody) newBody.scrollTop = savedScroll;
-        } else if (newBody) {
-            // First render: scroll so current hour is near the top, with 1h padding
+        var self = this;
+        if (newBody && (this._forceScrollToNow || savedScroll === null)) {
+            // Scroll so current time is 0.5h from the top
             var now = new Date();
-            var targetHour = Math.max(0, now.getHours() - 1);
-            newBody.scrollTop = targetHour * HOUR_HEIGHT;
+            var targetHour = Math.max(0, now.getHours() + now.getMinutes() / 60 - 0.5);
+            var scrollTarget = targetHour * HOUR_HEIGHT;
+            this._trackedScroll = scrollTarget;
+            newBody.scrollTop = scrollTarget;
+            // Defer scroll to ensure it takes effect after DOM layout
+            requestAnimationFrame(function() {
+                newBody.scrollTop = scrollTarget;
+            });
+        } else if (savedScroll !== null && newBody) {
+            newBody.scrollTop = savedScroll;
+        }
+        // Track scroll position so re-renders always have a reliable value
+        if (newBody) {
+            newBody.addEventListener('scroll', function() {
+                self._trackedScroll = newBody.scrollTop;
+            });
         }
     }
 
@@ -950,7 +970,7 @@ class CalendarView extends obsidian.ItemView {
             (function (col, colDateStr) {
                 col.addEventListener('mousedown', function (e) {
                     if (e.button !== 0) return; // left click only
-                    if (e.target.closest('.cal-event, .cal-task-timed, .cal-task-allday')) return;
+                    if (e.target.closest('.cal-event, .cal-task-timed, .cal-task-allday, .cal-event-task')) return;
                     self.startDragCreate(e, col, colDateStr, body);
                 });
             })(dayCol, dk);
@@ -1334,91 +1354,116 @@ class CalendarView extends obsidian.ItemView {
         }
     }
 
-    // ── Render an all-day task pill ─────────────────────────────
+    // ── Render a task row with a checkbox (all-day) ─────────────
     renderTaskAllDay(allDayCol, task) {
-        var self = this;
-        var rules = this.plugin.settings.colorRules;
-        var hex = resolveColor(matchColorRules(rules, task.file, task.fm)
-            || this.plugin.settings.defaultColor);
-        var color = colorFromHex(hex);
+        var row = allDayCol.createDiv({ cls: 'cal-task-row cal-task-allday' });
+        this._buildTaskRow(row, task, null);
+    }
 
-        if (this.plugin.settings.lineMode) {
-            // ── Line mode: colored bar + text (consistent with event lines)
-            var pill = allDayCol.createDiv({ cls: 'cal-task-allday cal-task-allday-line' });
+    // ── Render a task row with a checkbox (timed) ───────────────
+    renderTaskTimed(dayCol, task) {
+        var endHours = task.startTime;
+        var durHours = (task.durationMin || 0) / 60;
+        var endPx = (endHours - START_HOUR) * HOUR_HEIGHT;
 
-            var shape = pill.createDiv({ cls: 'cal-task-allday-line-shape' });
-            shape.style.background = hex;
+        if (durHours > 0) {
+            var rules = this.plugin.settings.colorRules;
+            var hex = resolveColor(matchColorRules(rules, task.file, task.fm)
+                || this.plugin.settings.defaultColor);
 
-            var textWrap = pill.createDiv({ cls: 'cal-task-allday-line-text' });
-            if (task.folderLabel) {
-                textWrap.createEl('span', { cls: 'cal-task-label', text: task.folderLabel + ': ' });
-            }
-            textWrap.createEl('span', { cls: 'cal-task-title', text: task.title });
-
-            pill.addEventListener('mouseenter', function () {
-                pill.classList.add('cal-task-hover');
-            });
-            pill.addEventListener('mouseleave', function () {
-                pill.classList.remove('cal-task-hover');
-            });
-        } else {
-            var pill = allDayCol.createDiv({ cls: 'cal-task-allday' });
-            pill.style.background = color.bg;
-            pill.style.borderLeft = '3px solid ' + color.border;
-
-            if (task.folderLabel) {
-                pill.createEl('span', { cls: 'cal-task-label', text: task.folderLabel + ': ' });
-            }
-            pill.createEl('span', { cls: 'cal-task-title', text: task.title });
-
-            pill.addEventListener('mouseenter', function () {
-                pill.classList.add('cal-task-hover');
-                pill.style.background = color.border;
-            });
-            pill.addEventListener('mouseleave', function () {
-                pill.classList.remove('cal-task-hover');
-                pill.style.background = color.bg;
-            });
+            var result = this.buildEventDOM(dayCol, endHours - durHours, task.durationMin, hex, task.title, {});
+            if (!result) return;
+            if (result.timeEl) result.timeEl.textContent = 'by ' + fmtTime(endHours);
+            this._decorateTaskEl(result.el, task);
+            return;
         }
-        pill.addEventListener('click', function () {
+
+        if (endPx < 0 || endPx > (END_HOUR - START_HOUR) * HOUR_HEIGHT) return;
+        var row = dayCol.createDiv({ cls: 'cal-task-row cal-task-timed' });
+        row.style.top = endPx + 'px';
+        this._buildTaskRow(row, task, fmtTime(endHours));
+    }
+
+    // ── Turn an event-style el into a task (checkbox + handlers) ─
+    _decorateTaskEl(el, task) {
+        var self = this;
+        el.classList.add('cal-event-task');
+        if (task.completed) el.classList.add('cal-task-completed');
+
+        var checkbox = el.createEl('input', { cls: 'cal-task-checkbox' });
+        checkbox.type = 'checkbox';
+        checkbox.checked = task.completed;
+        checkbox.addEventListener('click', function (e) { e.stopPropagation(); });
+        checkbox.addEventListener('change', async function () {
+            var nowChecked = checkbox.checked;
+            try {
+                await self.app.fileManager.processFrontMatter(task.file, function (fm) {
+                    if (nowChecked) fm.status = 'completed';
+                    else if (fm.status === 'completed') delete fm.status;
+                });
+                el.classList.toggle('cal-task-completed', nowChecked);
+                task.completed = nowChecked;
+            } catch (err) {
+                console.error('iris-calendar: failed to update task status', err);
+                checkbox.checked = !nowChecked;
+                new obsidian.Notice('Failed to update task status');
+            }
+        });
+
+        el.addEventListener('mouseenter', function () { el.classList.add('cal-event-hover'); });
+        el.addEventListener('mouseleave', function () { el.classList.remove('cal-event-hover'); });
+        el.addEventListener('mousedown', function (e) { e.stopPropagation(); });
+        el.addEventListener('click', function (e) {
+            if (e.target === checkbox) return;
+            e.stopPropagation();
             self.openNote(task.file, task.fm);
         });
-        pill.addEventListener('contextmenu', function (e) {
+        el.addEventListener('contextmenu', function (e) {
             e.preventDefault();
+            e.stopPropagation();
             self.showContextMenu(e, task.file, task.fm);
         });
     }
 
-    // ── Render a timed task marker ──────────────────────────────
-    renderTaskTimed(dayCol, task) {
+    // ── Shared task-row builder ─────────────────────────────────
+    _buildTaskRow(row, task, timeStr) {
         var self = this;
-        var top = (task.startTime - START_HOUR) * HOUR_HEIGHT;
-        if (top < 0 || top > (END_HOUR - START_HOUR) * HOUR_HEIGHT) return;
 
-        var rules = this.plugin.settings.colorRules;
-        var hex = resolveColor(matchColorRules(rules, task.file, task.fm)
-            || this.plugin.settings.defaultColor);
-        var color = colorFromHex(hex);
+        if (task.completed) row.classList.add('cal-task-completed');
 
-        var marker = dayCol.createDiv({ cls: 'cal-task-timed' });
-        marker.style.top = top + 'px';
-        if (!this.plugin.settings.lineMode) {
-            marker.style.borderColor = color.border;
-            marker.style.background = color.bg;
+        var checkbox = row.createEl('input', { cls: 'cal-task-checkbox' });
+        checkbox.type = 'checkbox';
+        checkbox.checked = task.completed;
+        checkbox.addEventListener('click', function (e) {
+            e.stopPropagation();
+        });
+        checkbox.addEventListener('change', async function () {
+            var nowChecked = checkbox.checked;
+            try {
+                await self.app.fileManager.processFrontMatter(task.file, function (fm) {
+                    if (nowChecked) fm.status = 'completed';
+                    else if (fm.status === 'completed') delete fm.status;
+                });
+                row.classList.toggle('cal-task-completed', nowChecked);
+                task.completed = nowChecked;
+            } catch (err) {
+                console.error('iris-calendar: failed to update task status', err);
+                checkbox.checked = !nowChecked;
+                new obsidian.Notice('Failed to update task status');
+            }
+        });
+
+        var textWrap = row.createDiv({ cls: 'cal-task-text' });
+        textWrap.createDiv({ cls: 'cal-task-title', text: task.title });
+        if (timeStr) {
+            textWrap.createDiv({ cls: 'cal-task-time', text: timeStr });
         }
 
-        var timeStr = fmtTime(task.startTime);
-
-        marker.createEl('span', { cls: 'cal-task-timed-dot' }).style.background = hex;
-        marker.createEl('span', {
-            cls: 'cal-task-timed-text',
-            text: timeStr + ' ' + task.title,
-        });
-
-        marker.addEventListener('click', function () {
+        row.addEventListener('click', function (e) {
+            if (e.target === checkbox) return;
             self.openNote(task.file, task.fm);
         });
-        marker.addEventListener('contextmenu', function (e) {
+        row.addEventListener('contextmenu', function (e) {
             e.preventDefault();
             self.showContextMenu(e, task.file, task.fm);
         });
@@ -2035,6 +2080,38 @@ class CalendarPlugin extends obsidian.Plugin {
 
         var totalCreated = 0, totalUpdated = 0, totalDeleted = 0;
 
+        // Cleanup: remove bodyless duplicate files sharing a gcalUid.
+        // Keeps the first file seen per UID; only deletes duplicates whose
+        // content is empty after the frontmatter block (safe — preserves any
+        // user-added notes).
+        try {
+            var cleanupVault = this.app.vault;
+            var cleanupFiles = cleanupVault.getMarkdownFiles();
+            var seenUid = {};
+            for (var ci = 0; ci < cleanupFiles.length; ci++) {
+                var cf = cleanupFiles[ci];
+                if (!cf.path.startsWith(syncFolder + '/')) continue;
+                var cText = await cleanupVault.read(cf);
+                var cFmMatch = cText.match(/^---\n[\s\S]*?\n---\n?/);
+                if (!cFmMatch) continue;
+                var cUidMatch = cFmMatch[0].match(/gcalUid:\s*"?([^"\n\r]+)"?/);
+                if (!cUidMatch) continue;
+                var cUid = cUidMatch[1];
+                var cBody = cText.slice(cFmMatch[0].length);
+                if (!seenUid[cUid]) {
+                    seenUid[cUid] = cf;
+                    continue;
+                }
+                // Duplicate UID — only delete if this file has no body content
+                if (cBody.trim() === '') {
+                    await cleanupVault.trash(cf, true);
+                    totalDeleted++;
+                }
+            }
+        } catch (e) {
+            console.error('Iris Calendar: Duplicate cleanup failed:', e);
+        }
+
         for (var f = 0; f < feeds.length; f++) {
             var feed = feeds[f];
             try {
@@ -2117,12 +2194,37 @@ class CalendarPlugin extends obsidian.Plugin {
                         var safeName = dateStr + ' ' + startStr.replace(':', '-') + ' ' +
                             summary.replace(/[\\/:*?"<>|]/g, '-').substring(0, 60).trim();
                         var filePath = syncFolder + '/' + safeName + '.md';
+                        // Path collision: metadata cache may be stale (cold start, or
+                        // file just created earlier in this sync). Read the existing
+                        // file's frontmatter directly and treat it as an update if its
+                        // gcalUid matches; only suffix the name for a true collision.
+                        var existingAtPath = vault.getAbstractFileByPath(filePath);
+                        var matchedExisting = null;
                         var n = 1;
-                        while (vault.getAbstractFileByPath(filePath)) {
+                        while (existingAtPath) {
+                            try {
+                                var existingText = await vault.read(existingAtPath);
+                                var uidMatch = existingText.match(/gcalUid:\s*"?([^"\n\r]+)"?/);
+                                if (uidMatch && uidMatch[1] === uid) {
+                                    matchedExisting = existingAtPath;
+                                    break;
+                                }
+                            } catch (e) { /* ignore, fall through to suffix */ }
                             filePath = syncFolder + '/' + safeName + ' ' + (++n) + '.md';
+                            existingAtPath = vault.getAbstractFileByPath(filePath);
                         }
-                        await vault.create(filePath, newFrontmatter);
-                        totalCreated++;
+                        if (matchedExisting) {
+                            var existing2 = await vault.read(matchedExisting);
+                            var existingFm2 = existing2.match(/^---\n[\s\S]*?\n---\n/);
+                            if (existingFm2 && existingFm2[0] !== newFrontmatter) {
+                                var body2 = existing2.slice(existingFm2[0].length);
+                                await vault.modify(matchedExisting, newFrontmatter + body2);
+                                totalUpdated++;
+                            }
+                        } else {
+                            await vault.create(filePath, newFrontmatter);
+                            totalCreated++;
+                        }
                     }
                 }
 
@@ -2165,28 +2267,35 @@ class CalendarPlugin extends obsidian.Plugin {
             if (!cache || !cache.frontmatter) continue;
             var fm = cache.frontmatter;
 
-            // Resolve date + startTime from either event or timed-task fields
-            var rawDate = null, timeVal = null;
             var evTime = fm.starts || fm.startTime || fm.time;
-            if (fm.date && evTime && (s.folders.length === 0 || inFolders(file.path, s.folders))) {
-                rawDate = fm.date;
-                timeVal = evTime;
-            } else if (fm.closes && fm.closeTime && inFolders(file.path, s.taskFolders)) {
-                if (fm.dailytask === true && fm.status === 'completed') continue;
-                rawDate = fm.closes;
-                timeVal = fm.closeTime;
-            }
-            if (!rawDate) continue;
+            if (!fm.date || !evTime || (s.folders.length > 0 && !inFolders(file.path, s.folders))) continue;
 
-            var dateStr = fmDateStr(rawDate);
+            var dateStr = fmDateStr(fm.date);
             if (dateStr !== todayStr) continue;
-            var startTime = parseTimeVal(timeVal);
+            var startTime = parseTimeVal(evTime);
             if (startTime === null) continue;
 
-            var minutesUntil = (startTime - nowHours) * 60;
-            if (minutesUntil <= 0 || minutesUntil > 60) continue;
-            if (!best || minutesUntil < best.minutesUntil) {
-                best = { title: fm.displayTitle || formatTitle(file.basename), minutesUntil: minutesUntil };
+            // Compute duration from endTime or duration field
+            var durationMin;
+            var endTimeVal = fm.endTime;
+            if (endTimeVal) {
+                var endTime = parseTimeVal(endTimeVal);
+                if (endTime !== null && endTime >= startTime) {
+                    durationMin = (endTime - startTime) * 60;
+                } else {
+                    durationMin = parseDuration(fm.duration);
+                }
+            } else {
+                durationMin = parseDuration(fm.duration);
+            }
+            if (!durationMin || durationMin <= 0) continue;
+
+            var endHours = startTime + durationMin / 60;
+            if (nowHours < startTime || nowHours >= endHours) continue;
+
+            var minutesLeft = (endHours - nowHours) * 60;
+            if (!best || minutesLeft < best.minutesLeft) {
+                best = { title: fm.displayTitle || formatTitle(file.basename), minutesLeft: minutesLeft };
             }
         }
 
@@ -2196,7 +2305,7 @@ class CalendarPlugin extends obsidian.Plugin {
             return;
         }
         this.statusBarEl.style.display = '';
-        this.statusBarEl.setText(best.title + ' in ' + Math.ceil(best.minutesUntil) + 'm');
+        this.statusBarEl.setText(best.title + ' \u2014 ' + Math.ceil(best.minutesLeft) + 'm left');
     }
 
     onunload() {
